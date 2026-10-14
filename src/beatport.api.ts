@@ -4,6 +4,20 @@ import { Logger } from "@pipe-bomb/plugin-sdk";
 const BEATPORT_WEB_URL = "https://www.beatport.com";
 const BEATPORT_API_URL = "https://api.beatport.com";
 
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1_000;
+const DEFAULT_MAX_TRACKS = 30;
+const DEFAULT_MAX_RELEASES = 50;
+const DEFAULT_MAX_RELEASE_PAGES = 5;
+const DEFAULT_PER_PAGE = 100;
+
+function formatDate(date: Date): string {
+	return date.toISOString().slice(0, 10);
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export interface BeatportImage {
 	id: number;
 	uri: string;
@@ -52,6 +66,10 @@ export interface BeatportLabel {
 	name: string;
 	slug: string;
 	image: BeatportImage | null;
+	url?: string;
+	bio?: string | null;
+	enabled?: boolean;
+	latest_active_publish_date?: string | null;
 }
 
 export interface BeatportRelease {
@@ -60,6 +78,15 @@ export interface BeatportRelease {
 	slug: string;
 	image: BeatportImage | null;
 	label: BeatportLabel | null;
+	publish_date?: string | null;
+	new_release_date?: string | null;
+	track_count?: number;
+	catalog_number?: string | null;
+	artists?: BeatportArtist[];
+	remixers?: BeatportArtist[];
+	is_explicit?: boolean;
+	is_hype?: boolean;
+	pre_order?: boolean;
 }
 
 export interface BeatportChordType {
@@ -199,6 +226,149 @@ export class BeatportApi {
 		return data.results;
 	}
 
+	async getLabel(labelId: number): Promise<BeatportLabel> {
+		return this.get<BeatportLabel>(`/v4/catalog/labels/${labelId}/`);
+	}
+
+	async getLabelReleasesSince(
+		labelId: number,
+		since: Date,
+		options: {
+			excludePreOrders?: boolean;
+			maxPages?: number;
+		} = {},
+	): Promise<BeatportRelease[]> {
+		const excludePreOrders = options.excludePreOrders ?? true;
+		const maxPages = options.maxPages ?? DEFAULT_MAX_RELEASE_PAGES;
+		const cutoff = formatDate(since);
+		const today = formatDate(new Date());
+
+		const releases: BeatportRelease[] = [];
+		let page = 1;
+
+		while (page <= maxPages) {
+			const data = await this.get<BeatportPaginated<BeatportRelease>>(
+				`/v4/catalog/labels/${labelId}/releases/`,
+				{
+					order_by: "-publish_date",
+					per_page: String(DEFAULT_PER_PAGE),
+					page: String(page),
+				},
+			);
+			const results = data.results ?? [];
+			if (!results.length) {
+				break;
+			}
+
+			let reachedCutoff = false;
+			for (const release of results) {
+				const publishDate = release.publish_date;
+				if (!publishDate) {
+					continue;
+				}
+				if (publishDate < cutoff) {
+					reachedCutoff = true;
+					break;
+				}
+				if (
+					excludePreOrders &&
+					(release.pre_order === true || publishDate > today)
+				) {
+					continue;
+				}
+				releases.push(release);
+			}
+
+			if (reachedCutoff || !data.next) {
+				break;
+			}
+			page++;
+		}
+
+		return releases;
+	}
+
+	async getReleaseTracks(releaseId: number): Promise<BeatportTrack[]> {
+		return this.getPaginated<BeatportTrack>(
+			`/v4/catalog/releases/${releaseId}/tracks/`,
+			{ per_page: String(DEFAULT_PER_PAGE) },
+		);
+	}
+
+	async getLabelTracksSince(
+		labelId: number,
+		options: {
+			since?: Date;
+			excludePreOrders?: boolean;
+			maxTracks?: number;
+			maxReleases?: number;
+		} = {},
+	): Promise<{ releases: BeatportRelease[]; tracks: BeatportTrack[] }> {
+		const since = options.since ?? new Date(Date.now() - THIRTY_DAYS_MS);
+		const maxTracks = options.maxTracks ?? DEFAULT_MAX_TRACKS;
+		const maxReleases = options.maxReleases ?? DEFAULT_MAX_RELEASES;
+
+		const releases = await this.getLabelReleasesSince(labelId, since, {
+			excludePreOrders: options.excludePreOrders,
+		});
+
+		const contributingReleases: BeatportRelease[] = [];
+		const tracks: BeatportTrack[] = [];
+		const seen = new Set<number>();
+		let scanned = 0;
+
+		for (const release of releases) {
+			if (tracks.length >= maxTracks || scanned >= maxReleases) {
+				break;
+			}
+			scanned++;
+
+			const releaseTracks = await this.getReleaseTracks(release.id);
+			let contributed = false;
+			for (const track of releaseTracks) {
+				if (seen.has(track.id)) {
+					continue;
+				}
+				seen.add(track.id);
+				tracks.push(track);
+				contributed = true;
+				if (tracks.length >= maxTracks) {
+					break;
+				}
+			}
+			if (contributed) {
+				contributingReleases.push(release);
+			}
+		}
+
+		return { releases: contributingReleases, tracks };
+	}
+
+	private async getPaginated<T>(
+		path: string,
+		query: Record<string, string> = {},
+		options: { maxPages?: number } = {},
+	): Promise<T[]> {
+		const maxPages = options.maxPages ?? 10;
+		const results: T[] = [];
+		let page = 1;
+
+		while (page <= maxPages) {
+			const data = await this.get<BeatportPaginated<T>>(path, {
+				...query,
+				page: String(page),
+			});
+			const items = data.results ?? [];
+			results.push(...items);
+			if (!data.next || !items.length) {
+				break;
+			}
+			page++;
+		}
+
+		return results;
+	}
+
 	private async get<T>(
 		path: string,
 		query?: Record<string, string>,
@@ -208,38 +378,49 @@ export class BeatportApi {
 			url.searchParams.set(key, value);
 		}
 
-		const token = await this.getAnonToken();
-		const response = await fetch(url, {
-			headers: {
-				Authorization: `Bearer ${token}`,
-				Accept: "application/json",
-			},
-		});
-
-		if (response.status === 401) {
-			this.session = null;
-			const refreshed = await this.getAnonToken();
-			const retry = await fetch(url, {
+		const maxAttempts = 3;
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			const token = await this.getAnonToken();
+			const response = await fetch(url, {
 				headers: {
-					Authorization: `Bearer ${refreshed}`,
+					Authorization: `Bearer ${token}`,
 					Accept: "application/json",
 				},
 			});
-			if (!retry.ok) {
+
+			if (response.status === 401) {
+				this.session = null;
+				if (attempt >= maxAttempts) {
+					throw new Error(
+						`Beatport API request to ${path} failed with HTTP 401`,
+					);
+				}
+				continue;
+			}
+
+			if (response.status === 429 || response.status >= 500) {
+				if (attempt >= maxAttempts) {
+					throw new Error(
+						`Beatport API request to ${path} failed with HTTP ${response.status}`,
+					);
+				}
+				const retryAfter = Number(response.headers.get("retry-after"));
+				await sleep(
+					retryAfter > 0 ? retryAfter * 1_000 : 500 * attempt,
+				);
+				continue;
+			}
+
+			if (!response.ok) {
 				throw new Error(
-					`Beatport API request to ${path} failed with HTTP ${retry.status}`,
+					`Beatport API request to ${path} failed with HTTP ${response.status}`,
 				);
 			}
-			return (await retry.json()) as T;
+
+			return (await response.json()) as T;
 		}
 
-		if (!response.ok) {
-			throw new Error(
-				`Beatport API request to ${path} failed with HTTP ${response.status}`,
-			);
-		}
-
-		return (await response.json()) as T;
+		throw new Error(`Beatport API request to ${path} failed`);
 	}
 
 	private async getAnonToken(): Promise<string> {

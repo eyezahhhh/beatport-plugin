@@ -1,4 +1,5 @@
 {
 	"plugin.beatport.name": "Beatport",
-	"task.plugin.beatport.create-charts.name": "Create Beatport Top 100 Charts"
+	"task.plugin.beatport.create-charts.name": "Create Beatport Top 100 Charts",
+	"task.plugin.beatport.create-label-playlists.name": "Create Label New Release Playlists"
 }

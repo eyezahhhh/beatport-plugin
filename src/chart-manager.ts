@@ -20,6 +20,35 @@ import {
 } from "./utils.js";
 import { SearchClient } from "ephemeral-import/src/search-client.js";
 import { SearchAttribute } from "ephemeral-import/src/attribute-entry.js";
+import { writeFile } from "fs/promises";
+
+const DRY_RUN = true;
+const DRY_RUN_GENRE_IDS = [5];
+const DRY_RUN_PATH = "/tmp/opencode/beatport-dryrun.json";
+
+function readName(attribute: any): string | null {
+	if (!attribute) {
+		return null;
+	}
+	if (attribute.value !== undefined) {
+		return String(attribute.value);
+	}
+	if (Array.isArray(attribute.values)) {
+		return attribute.values[0] != null ? String(attribute.values[0]) : null;
+	}
+	return null;
+}
+
+function artistNames(artists: any[] | null | undefined): string[] {
+	if (!artists) {
+		return [];
+	}
+	return artists.map((entry) => {
+		const attributes = entry?.artist?.attributes ?? entry?.attributes ?? [];
+		const name = attributes.find((a: any) => a.key === "name");
+		return readName(name) ?? "?";
+	});
+}
 
 export class ChartManager {
 	public static readonly PLAYLIST_BOT_ID = "chart";
@@ -158,6 +187,10 @@ export class ChartManager {
 	}
 
 	public async sync(ctx: TaskRunContext) {
+		if (DRY_RUN) {
+			return this.syncDryRun(ctx);
+		}
+
 		const charts = await this.getCharts();
 
 		const playlistIds = await this.getPlaylistIds(
@@ -276,5 +309,172 @@ export class ChartManager {
 			}
 			await this.playlistClient.addToPlaylist(playlistId, trackUuids);
 		}
+	}
+
+	private async syncDryRun(ctx: TaskRunContext) {
+		try {
+			await this.dryRunInner(ctx);
+		} catch (e) {
+			this.logger.error("[dry-run] FAILED", e);
+			await writeFile(
+				DRY_RUN_PATH + ".error",
+				String((e as Error)?.stack ?? e),
+			);
+		}
+	}
+
+	private async dryRunInner(ctx: TaskRunContext) {
+		await writeFile(
+			DRY_RUN_PATH + ".started",
+			new Date().toISOString(),
+		);
+		const searchClient = await this.getSearchClient();
+		if (!searchClient) {
+			this.logger.warn(
+				"Unable to generate charts because the ephemeral-import search client couldn't be retrieved. Is it installed?",
+			);
+			await writeFile(DRY_RUN_PATH + ".error", "no search client");
+			return;
+		}
+
+		const genres = await this.api.getGenres();
+		const byId = new Map(genres.map((genre) => [genre.id, genre]));
+		const charts: Chart[] = [];
+		for (const genreId of DRY_RUN_GENRE_IDS) {
+			const genre = byId.get(genreId);
+			if (!genre) {
+				this.logger.warn(`Beatport genre ${genreId} does not exist, skipping.`);
+				continue;
+			}
+			charts.push(new Chart(genre, this.api));
+		}
+
+		const records: any[] = [];
+
+		const chartPercentSize = 1 / Math.max(charts.length, 1);
+		for (const [index, chart] of charts.entries()) {
+			const top100 = await chart.getTop100();
+			for (const [trackIndex, beatportTrack] of top100.entries()) {
+				ctx.update(
+					chartPercentSize * index +
+						(chartPercentSize / top100.length) * trackIndex,
+				);
+				const attributes = extractAttributes(beatportTrack);
+				const title = getTrackTitle(beatportTrack);
+				const artists: SearchAttribute[][] = beatportTrack.artists.map(
+					(artist) => [{ key: "name", type: "string", value: artist.name }],
+				);
+				const album: SearchAttribute[] | undefined = beatportTrack.release?.name
+					? [
+							{
+								key: "title",
+								type: "string",
+								value: beatportTrack.release.name,
+							},
+						]
+					: undefined;
+
+				let result: Awaited<ReturnType<typeof searchClient.findTrack>> = null;
+				let debug: any = null;
+				let findError: string | null = null;
+				try {
+					debug = await (searchClient as any).debugFindTrack({
+						title,
+						artists,
+						album,
+						attributes,
+						confidenceMatch: 0,
+					});
+					result = await searchClient.findTrack({
+						title,
+						artists,
+						album,
+						attributes,
+					});
+				} catch (e) {
+					findError = String((e as Error)?.stack ?? e);
+					this.logger.error(`[dry-run] findTrack failed for "${title}"`, e);
+				}
+
+				const summarize = (outcome: any, kind: "library" | "ephemeral") => {
+					if (!outcome) {
+						return null;
+					}
+					if (kind === "library") {
+						return {
+							confidence: outcome.confidence,
+							title: outcome.value.title,
+							artists: artistNames(outcome.value.artists as any),
+							source: `${outcome.value.pluginId}:${outcome.value.libraryId}`,
+							scores: outcome.results,
+						};
+					}
+					return {
+						confidence: outcome.confidence,
+						title: outcome.value.track.title,
+						artists: artistNames(outcome.value.track.artists as any),
+						source: `${outcome.value.source.pluginId}:${outcome.value.source.sourceId}`,
+						scores: outcome.results,
+					};
+				};
+
+				const record: any = {
+					findError,
+					library: summarize(debug?.library, "library"),
+					ephemeral: summarize(debug?.ephemeral, "ephemeral"),
+					index: trackIndex + 1,
+					beatport: {
+						id: beatportTrack.id,
+						title,
+						artists: beatportTrack.artists.map((a) => a.name),
+						album: beatportTrack.release?.name ?? null,
+						label: beatportTrack.release?.label?.name ?? null,
+						isrc: beatportTrack.isrc ?? null,
+						duration: beatportTrack.length_ms / 1000,
+						bpm: beatportTrack.bpm,
+						genre: beatportTrack.genre?.name ?? null,
+						subGenre: beatportTrack.sub_genre?.name ?? null,
+					},
+					match: null,
+				};
+
+				if (result) {
+					if (result.ephemeral) {
+						record.match = {
+							ephemeral: true,
+							confidence: result.confidence,
+							source: `${result.source.pluginId}:${result.source.sourceId}`,
+							title: result.track.title,
+							artists: artistNames(result.track.artists as any),
+							trackId: result.track.id,
+							uuid: null,
+						};
+					} else {
+						record.match = {
+							ephemeral: false,
+							confidence: result.confidence,
+							source: `${result.track.pluginId}:${result.track.libraryId}`,
+							title: result.track.title,
+							artists: artistNames(result.track.artists as any),
+							trackId: (result.track as any).trackId ?? null,
+							uuid: (result.track as any).uuid ?? null,
+						};
+					}
+				}
+
+				records.push(record);
+				await writeFile(DRY_RUN_PATH, JSON.stringify(records, null, 2));
+				this.logger.debug(
+					`[dry-run] ${trackIndex + 1}/${top100.length} "${title}" -> ` +
+						(record.match
+							? `${record.match.confidence.toFixed(3)} ${record.match.source} "${record.match.title}"`
+							: "NO MATCH"),
+				);
+			}
+		}
+
+		this.logger.log(
+			`[dry-run] Finished. Wrote ${records.length} records to ${DRY_RUN_PATH}`,
+		);
 	}
 }

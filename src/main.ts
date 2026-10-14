@@ -19,10 +19,7 @@ export default class BeatportPlugin implements Plugin {
 		const config = new BeatportConfigManager();
 		ctx.registerConfigManager(config);
 
-		const api = new BeatportApi(
-			() => config.getSolverUrl(),
-			ctx.getLogger(),
-		);
+		const api = new BeatportApi(() => config.getSolverUrl(), ctx.getLogger());
 
 		const chartManager = new ChartManager(
 			() => this.getClient(),
@@ -40,6 +37,12 @@ export default class BeatportPlugin implements Plugin {
 			id: "create-charts",
 			resumable: false,
 			run: (ctx) => chartManager.sync(ctx),
+		});
+
+		ctx.registerTask({
+			id: "create-label-playlists",
+			resumable: false,
+			run: async (ctx) => {},
 		});
 	}
 	disable(): void {
