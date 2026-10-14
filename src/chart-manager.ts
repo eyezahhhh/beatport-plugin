@@ -5,12 +5,7 @@ import {
 	TaskRunContext,
 	WritablePlaylistClient,
 } from "@pipe-bomb/plugin-sdk";
-import {
-	BeatportApi,
-	BeatportGenre,
-	BeatportImage,
-	BeatportTrack,
-} from "./beatport.api.js";
+import { BeatportApi, BeatportGenre, BeatportImage } from "./beatport.api.js";
 import { BeatportConfigManager } from "./beatport.config-manager.js";
 import { Chart } from "./chart/chart.js";
 import {
@@ -22,9 +17,9 @@ import { SearchClient } from "ephemeral-import/src/search-client.js";
 import { SearchAttribute } from "ephemeral-import/src/attribute-entry.js";
 import { writeFile } from "fs/promises";
 
-const DRY_RUN = true;
+const DRY_RUN = false;
 const DRY_RUN_GENRE_IDS = [5];
-const DRY_RUN_PATH = "/tmp/opencode/beatport-dryrun.json";
+const DRY_RUN_PATH = "/tmp/beatport-dryrun.json";
 
 function readName(attribute: any): string | null {
 	if (!attribute) {
@@ -324,10 +319,7 @@ export class ChartManager {
 	}
 
 	private async dryRunInner(ctx: TaskRunContext) {
-		await writeFile(
-			DRY_RUN_PATH + ".started",
-			new Date().toISOString(),
-		);
+		await writeFile(DRY_RUN_PATH + ".started", new Date().toISOString());
 		const searchClient = await this.getSearchClient();
 		if (!searchClient) {
 			this.logger.warn(
