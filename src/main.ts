@@ -1,5 +1,5 @@
 import { Plugin, PluginApiContext } from "@pipe-bomb/plugin-sdk";
-import type EphemeralImportPlugin from "ephemeral-import/src/main.js";
+import { SublimatePlugin } from "sublimate";
 import { ChartManager } from "./chart-manager.js";
 import { BeatportApi } from "./beatport.api.js";
 import { BeatportAttributeSource } from "./beatport.attribute-source.js";
@@ -54,8 +54,7 @@ export default class BeatportPlugin implements Plugin {
 			throw new Error("Plugin isn't enabled");
 		}
 
-		const plugin =
-			await this.ctx.getPlugin<EphemeralImportPlugin>("ephemeral-import");
+		const plugin = await this.ctx.getPlugin<SublimatePlugin>("sublimate");
 		if (plugin) {
 			return plugin.getSearchClient();
 		}

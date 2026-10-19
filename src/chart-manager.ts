@@ -13,8 +13,7 @@ import {
 	extractAttributes,
 	getTrackTitle,
 } from "./utils.js";
-import { SearchClient } from "ephemeral-import/src/search-client.js";
-import { SearchAttribute } from "ephemeral-import/src/attribute-entry.js";
+import { SearchAttribute, SearchClient } from "sublimate";
 import { writeFile } from "fs/promises";
 
 const DRY_RUN = false;
@@ -199,7 +198,7 @@ export class ChartManager {
 		const searchClient = await this.getSearchClient();
 		if (!searchClient) {
 			this.logger.warn(
-				"Unable to generate charts because the ephemeral-import search client couldn't be retrieved. Is it installed?",
+				"Unable to generate charts because the sublimate search client couldn't be retrieved. Is it installed?",
 			);
 			return;
 		}
@@ -323,7 +322,7 @@ export class ChartManager {
 		const searchClient = await this.getSearchClient();
 		if (!searchClient) {
 			this.logger.warn(
-				"Unable to generate charts because the ephemeral-import search client couldn't be retrieved. Is it installed?",
+				"Unable to generate charts because the sublimate search client couldn't be retrieved. Is it installed?",
 			);
 			await writeFile(DRY_RUN_PATH + ".error", "no search client");
 			return;

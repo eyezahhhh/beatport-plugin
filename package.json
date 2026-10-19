@@ -15,8 +15,8 @@
 		"@pipe-bomb/plugin-sdk": "^0.5.0",
 		"axios": "^1.20.0",
 		"beatport-api": "^1.0.8",
-		"ephemeral-import": "github:eyezahhhh/ephemeral-import-plugin",
-		"sharp": "^0.35.5"
+		"sharp": "^0.35.5",
+		"sublimate": "github:pipe-bomb/sublimate-plugin"
 	},
 	"devDependencies": {
 		"nodemon": "^3.1.14",
