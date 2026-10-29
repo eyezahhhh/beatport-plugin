@@ -4,6 +4,8 @@ import { ChartManager } from "./chart-manager.js";
 import { BeatportApi } from "./beatport.api.js";
 import { BeatportAttributeSource } from "./beatport.attribute-source.js";
 import { BeatportConfigManager } from "./beatport.config-manager.js";
+import { LabelUserConfigManager } from "./label.user-config-manager.js";
+import { LabelManager } from "./label-manager.js";
 
 export default class BeatportPlugin implements Plugin {
 	private ctx: PluginApiContext | null = null;
@@ -39,10 +41,25 @@ export default class BeatportPlugin implements Plugin {
 			run: (ctx) => chartManager.sync(ctx),
 		});
 
+		const labelConfigManager = new LabelUserConfigManager();
+		ctx.registerUserConfigManager("labels", labelConfigManager);
+
+		const labelManager = new LabelManager(
+			() => this.getClient(),
+			ctx.getDataClient(),
+			ctx.getPlaylistClient({
+				id: LabelManager.PLAYLIST_BOT_ID,
+				name: "Beatport Label",
+			}),
+			ctx.getLogger(),
+			labelConfigManager,
+			api,
+		);
+
 		ctx.registerTask({
 			id: "create-label-playlists",
 			resumable: false,
-			run: async (ctx) => {},
+			run: async (ctx) => labelManager.sync(ctx),
 		});
 	}
 	disable(): void {
