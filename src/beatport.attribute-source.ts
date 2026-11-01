@@ -44,6 +44,16 @@ export class BeatportAttributeSource implements AttributeSource {
 				type: "buffer",
 				supportsMultiple: false,
 			},
+			{
+				key: "beatport_label_id",
+				type: "integer",
+				supportsMultiple: false,
+			},
+			{
+				key: "beatport_label_slug",
+				type: "string",
+				supportsMultiple: false,
+			},
 		]);
 	}
 	getName(): string {
