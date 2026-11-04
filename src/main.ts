@@ -1,11 +1,12 @@
 import { Plugin, PluginApiContext } from "@pipe-bomb/plugin-sdk";
 import { SublimatePlugin } from "sublimate";
 import { ChartManager } from "./chart-manager.js";
-import { BeatportApi } from "./beatport.api.js";
+import { BeatportApi } from "./cache/beatport.api.js";
 import { BeatportAttributeSource } from "./beatport.attribute-source.js";
 import { BeatportConfigManager } from "./beatport.config-manager.js";
 import { LabelUserConfigManager } from "./label.user-config-manager.js";
 import { LabelManager } from "./label-manager.js";
+import path from "path";
 
 export default class BeatportPlugin implements Plugin {
 	private ctx: PluginApiContext | null = null;
@@ -18,48 +19,58 @@ export default class BeatportPlugin implements Plugin {
 		const attributeSource = new BeatportAttributeSource();
 		ctx.registerAttributeSource(attributeSource);
 
-		const config = new BeatportConfigManager();
-		ctx.registerConfigManager(config);
+		ctx.requestCacheDirectory().then((cacheDir) => {
+			let getSolver: () => string | null = () => null;
 
-		const api = new BeatportApi(() => config.getSolverUrl(), ctx.getLogger());
+			const api = new BeatportApi(
+				() => getSolver(),
+				path.join(cacheDir, "cache.db"),
+				ctx.getLogger(),
+			);
 
-		const chartManager = new ChartManager(
-			() => this.getClient(),
-			ctx.getDataClient(),
-			ctx.getPlaylistClient({
-				id: ChartManager.PLAYLIST_BOT_ID,
-				name: "Beatport Charts",
-			}),
-			ctx.getLogger(),
-			config,
-			api,
-		);
+			const config = new BeatportConfigManager(api);
+			getSolver = () => config.getSolverUrl();
 
-		ctx.registerTask({
-			id: "create-charts",
-			resumable: false,
-			run: (ctx) => chartManager.sync(ctx),
-		});
+			ctx.registerConfigManager(config);
 
-		const labelConfigManager = new LabelUserConfigManager();
-		ctx.registerUserConfigManager("labels", labelConfigManager);
+			const chartManager = new ChartManager(
+				() => this.getClient(),
+				ctx.getDataClient(),
+				ctx.getPlaylistClient({
+					id: ChartManager.PLAYLIST_BOT_ID,
+					name: "Beatport Charts",
+				}),
+				ctx.getLogger(),
+				config,
+				api,
+			);
 
-		const labelManager = new LabelManager(
-			() => this.getClient(),
-			ctx.getDataClient(),
-			ctx.getPlaylistClient({
-				id: LabelManager.PLAYLIST_BOT_ID,
-				name: "Beatport Label",
-			}),
-			ctx.getLogger(),
-			labelConfigManager,
-			api,
-		);
+			ctx.registerTask({
+				id: "create-charts",
+				resumable: false,
+				run: (ctx) => chartManager.sync(ctx),
+			});
 
-		ctx.registerTask({
-			id: "create-label-playlists",
-			resumable: false,
-			run: async (ctx) => labelManager.sync(ctx),
+			const labelConfigManager = new LabelUserConfigManager();
+			ctx.registerUserConfigManager("labels", labelConfigManager);
+
+			const labelManager = new LabelManager(
+				() => this.getClient(),
+				ctx.getDataClient(),
+				ctx.getPlaylistClient({
+					id: LabelManager.PLAYLIST_BOT_ID,
+					name: "Beatport Label",
+				}),
+				ctx.getLogger(),
+				labelConfigManager,
+				api,
+			);
+
+			ctx.registerTask({
+				id: "create-label-playlists",
+				resumable: false,
+				run: async (ctx) => labelManager.sync(ctx),
+			});
 		});
 	}
 	disable(): void {

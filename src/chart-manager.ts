@@ -5,7 +5,11 @@ import {
 	TaskRunContext,
 	WritablePlaylistClient,
 } from "@pipe-bomb/plugin-sdk";
-import { BeatportApi, BeatportGenre, BeatportImage } from "./beatport.api.js";
+import {
+	BeatportApi,
+	BeatportGenre,
+	BeatportImage,
+} from "./cache/beatport.api.js";
 import { BeatportConfigManager } from "./beatport.config-manager.js";
 import { Chart } from "./chart/chart.js";
 import {

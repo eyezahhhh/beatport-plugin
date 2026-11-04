@@ -6,7 +6,7 @@ import {
 	WritablePlaylistClient,
 } from "@pipe-bomb/plugin-sdk";
 import { SearchAttribute, SearchClient } from "sublimate";
-import { BeatportApi, BeatportLabel } from "./beatport.api.js";
+import { BeatportApi, BeatportLabel } from "./cache/beatport.api.js";
 import { LabelUserConfigManager } from "./label.user-config-manager.js";
 import { extractAttributes, getTrackTitle } from "./utils.js";
 import { extname } from "path";

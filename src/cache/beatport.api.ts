@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Logger } from "@pipe-bomb/plugin-sdk";
+import { PersistentCache } from "./persistent-cache.js";
 
 const BEATPORT_WEB_URL = "https://www.beatport.com";
 const BEATPORT_API_URL = "https://api.beatport.com";
@@ -197,37 +198,69 @@ interface SolverResponse {
 	solution?: SolverSolution;
 }
 
+const TTL_HOUR = 1000 * 60 * 60;
+const TTL_DAY = TTL_HOUR * 24;
+const TTL_WEEK = TTL_DAY * 7;
+
 export class BeatportApi {
 	private session: AnonSession | null = null;
 	private tokenPromise: Promise<string> | null = null;
 
+	private readonly cache: PersistentCache;
+
 	constructor(
 		private readonly getSolverUrl: () => string | null,
+		dbFile: string,
 		private readonly logger: Logger,
-	) {}
+	) {
+		this.cache = new PersistentCache(dbFile);
+	}
 
-	async getGenres(): Promise<BeatportGenre[]> {
-		const data = await this.get<BeatportPaginated<BeatportGenre>>(
-			"/v4/catalog/genres/",
-			{ per_page: "100" },
+	getGenres(): Promise<BeatportGenre[]> {
+		return this.cache.getOrFind(
+			`genres`,
+			() =>
+				this.get<BeatportPaginated<BeatportGenre>>("/v4/catalog/genres/", {
+					per_page: "100",
+				}).then((data) => data.results),
+			{
+				ttl: TTL_WEEK,
+			},
 		);
-		return data.results;
 	}
 
 	async getGenre(genreId: number): Promise<BeatportGenre> {
-		return this.get<BeatportGenre>(`/v4/catalog/genres/${genreId}/`);
+		return this.cache.getOrFind(
+			`genre:${genreId}`,
+			() => this.get<BeatportGenre>(`/v4/catalog/genres/${genreId}/`),
+			{
+				ttl: TTL_WEEK,
+			},
+		);
 	}
 
 	async getTop100(genreId: number, hype = false): Promise<BeatportTrack[]> {
-		const data = await this.get<BeatportPaginated<BeatportTrack>>(
-			`/v4/catalog/genres/${genreId}/top/100/`,
-			{ per_page: "100", hype: String(hype) },
+		return this.cache.getOrFind(
+			`genre:${genreId}:top-100:${hype ? "hype" : "not-hype"}`,
+			() =>
+				this.get<BeatportPaginated<BeatportTrack>>(
+					`/v4/catalog/genres/${genreId}/top/100/`,
+					{ per_page: "100", hype: String(hype) },
+				).then((data) => data.results),
+			{
+				ttl: TTL_HOUR,
+			},
 		);
-		return data.results;
 	}
 
 	async getLabel(labelId: number): Promise<BeatportLabel> {
-		return this.get<BeatportLabel>(`/v4/catalog/labels/${labelId}/`);
+		return this.cache.getOrFind(
+			`label:${labelId}`,
+			() => this.get<BeatportLabel>(`/v4/catalog/labels/${labelId}/`),
+			{
+				ttl: TTL_DAY,
+			},
+		);
 	}
 
 	async getLabelReleasesSince(
@@ -289,9 +322,16 @@ export class BeatportApi {
 	}
 
 	async getReleaseTracks(releaseId: number): Promise<BeatportTrack[]> {
-		return this.getPaginated<BeatportTrack>(
-			`/v4/catalog/releases/${releaseId}/tracks/`,
-			{ per_page: String(DEFAULT_PER_PAGE) },
+		return this.cache.getOrFind(
+			`release:${releaseId}:tracks`,
+			() =>
+				this.getPaginated<BeatportTrack>(
+					`/v4/catalog/releases/${releaseId}/tracks/`,
+					{ per_page: String(DEFAULT_PER_PAGE) },
+				),
+			{
+				ttl: TTL_WEEK,
+			},
 		);
 	}
 
@@ -405,9 +445,7 @@ export class BeatportApi {
 					);
 				}
 				const retryAfter = Number(response.headers.get("retry-after"));
-				await sleep(
-					retryAfter > 0 ? retryAfter * 1_000 : 500 * attempt,
-				);
+				await sleep(retryAfter > 0 ? retryAfter * 1_000 : 500 * attempt);
 				continue;
 			}
 

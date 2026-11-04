@@ -12,9 +12,11 @@
 	"license": "ISC",
 	"type": "module",
 	"dependencies": {
-		"@pipe-bomb/plugin-sdk": "^0.5.0",
+		"@keyv/sqlite": "^6.1.0",
+		"@pipe-bomb/plugin-sdk": "file:../../sdk",
 		"axios": "^1.20.0",
 		"beatport-api": "^1.0.8",
+		"keyv": "^6.1.0",
 		"sharp": "^0.35.5",
 		"sublimate": "github:pipe-bomb/sublimate-plugin"
 	},

@@ -1,5 +1,5 @@
 import { BufferAttributeValue } from "@pipe-bomb/plugin-sdk";
-import { BeatportImage, BeatportTrack } from "./beatport.api.js";
+import { BeatportImage, BeatportTrack } from "./cache/beatport.api.js";
 import { SearchAttribute } from "sublimate";
 import { extname } from "path";
 import sharp from "sharp";

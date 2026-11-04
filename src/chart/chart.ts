@@ -1,4 +1,8 @@
-import { BeatportApi, BeatportGenre, BeatportTrack } from "../beatport.api.js";
+import {
+	BeatportApi,
+	BeatportGenre,
+	BeatportTrack,
+} from "../cache/beatport.api.js";
 
 export class Chart {
 	constructor(
